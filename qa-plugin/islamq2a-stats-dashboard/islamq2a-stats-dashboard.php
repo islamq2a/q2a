@@ -28,8 +28,18 @@ class qa_islamq2a_stats_dashboard
 		$ratios = $this->calculate_ratios($totals);
 		$timeline = $this->fetch_daily_timeline(30);
 		$health = $this->calculate_health_index();
+		$avg_first_answer_7 = $this->fetch_avg_first_answer_time(7);
+		$avg_first_answer_30 = $this->fetch_avg_first_answer_time(30);
 
-		$qa_content['custom'] = $this->render_dashboard($totals, $periods, $ratios, $timeline, $health);
+		$qa_content['custom'] = $this->render_dashboard(
+			$totals,
+			$periods,
+			$ratios,
+			$timeline,
+			$health,
+			$avg_first_answer_7,
+			$avg_first_answer_30
+		);
 
 		return $qa_content;
 	}
@@ -238,6 +248,58 @@ class qa_islamq2a_stats_dashboard
 		END";
 	}
 
+	private function fetch_avg_first_answer_time($days)
+	{
+		$since = time() - ((int) $days * 86400);
+		$created_expr = $this->normalized_created_expression();
+
+		$result = qa_db_read_one_value(
+			qa_db_query_sub(
+				"SELECT AVG(TIMESTAMPDIFF(SECOND, q.q_created, a.first_answer_created))
+				 FROM (
+					SELECT postid, ($created_expr) AS q_created
+					FROM ^posts
+					WHERE type='Q'
+					AND ($created_expr) >= FROM_UNIXTIME(#)
+				 ) AS q
+				 JOIN (
+					SELECT parentid, MIN($created_expr) AS first_answer_created
+					FROM ^posts
+					WHERE type='A'
+					GROUP BY parentid
+				 ) AS a
+				 ON a.parentid = q.postid",
+				$since
+			),
+			true
+		);
+
+		return $result !== null ? (int) round($result) : 0;
+	}
+
+	private function format_duration_seconds($seconds)
+	{
+		$seconds = max(0, (int) $seconds);
+		if ($seconds === 0) {
+			return 'غير متوفر';
+		}
+
+		$hours = floor($seconds / 3600);
+		$minutes = floor(($seconds % 3600) / 60);
+		$days = floor($hours / 24);
+		$remaining_hours = $hours % 24;
+
+		if ($days > 0) {
+			return $days . ' يوم ' . $remaining_hours . ' ساعة';
+		}
+
+		if ($hours > 0) {
+			return $hours . ' ساعة ' . $minutes . ' دقيقة';
+		}
+
+		return $minutes . ' دقيقة';
+	}
+
 	private function fetch_period_post_counts($days)
 	{
 		$since = time() - ((int) $days * 86400);
@@ -367,7 +429,7 @@ class qa_islamq2a_stats_dashboard
 		);
 	}
 
-	private function render_dashboard($totals, $periods, $ratios, $timeline, $health)
+	private function render_dashboard($totals, $periods, $ratios, $timeline, $health, $avg_first_answer_7, $avg_first_answer_30)
 	{
 		$rows = array();
 		$rows[] = '<div class="qa-islamq2a-stats" style="direction: rtl; font-family: Tahoma, Arial, sans-serif; color: #1f2937;">';
@@ -381,6 +443,7 @@ class qa_islamq2a_stats_dashboard
 			.qa-islamq2a-stats .qa-stat-card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 			.qa-islamq2a-stats .qa-stat-card h3 { margin: 0 0 6px; font-size: 14px; color: #6b7280; }
 			.qa-islamq2a-stats .qa-stat-card .qa-stat-number { font-size: 20px; font-weight: 700; color: #111827; }
+			.qa-islamq2a-stats .qa-stat-card.qa-stat-small .qa-stat-number { font-size: 16px; font-weight: 600; }
 		</style>';
 		$rows[] = '<h2>الإجماليات</h2>';
 		$rows[] = '<div class="qa-stats-grid">';
@@ -401,6 +464,8 @@ class qa_islamq2a_stats_dashboard
 		$rows[] = '<div class="qa-stat-card"><h3>مؤشر الصحة</h3><div class="qa-stat-number">' . qa_html($health['score']) . ' / 100</div></div>';
 		$rows[] = '<div class="qa-stat-card"><h3>الحالة</h3><div class="qa-stat-number">' . qa_html($health['status']) . '</div></div>';
 		$rows[] = '<div class="qa-stat-card"><h3>شرح مختصر</h3><div class="qa-stat-number" style="font-size:14px; font-weight:600;">' . qa_html($health['summary']) . '</div></div>';
+		$rows[] = '<div class="qa-stat-card"><h3>متوسط زمن أول إجابة (7 أيام)</h3><div class="qa-stat-number">' . qa_html($this->format_duration_seconds($avg_first_answer_7)) . '</div></div>';
+		$rows[] = '<div class="qa-stat-card qa-stat-small"><h3>متوسط زمن أول إجابة (30 يومًا)</h3><div class="qa-stat-number">' . qa_html($this->format_duration_seconds($avg_first_answer_30)) . '</div></div>';
 		$rows[] = '</div>';
 
 		$rows[] = '<h2>تفاصيل المؤشر (آخر 7 أيام)</h2>';
